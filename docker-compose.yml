@@ -1,0 +1,109 @@
+x-env-backend: &env_backend
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+  BACKEND_HOST: ${BACKEND_HOST}
+  BACKEND_PORT: ${BACKEND_PORT}
+  CORS_ORIGINS: ${CORS_ORIGINS}
+  MQTT_HOST: ${MQTT_HOST}
+  MQTT_PORT: ${MQTT_PORT}
+  MQTT_USERNAME: ${MQTT_USERNAME}
+  MQTT_PASSWORD: ${MQTT_PASSWORD}
+  MQTT_TOPIC_BASE: ${MQTT_TOPIC_BASE}
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  OPENAI_MODEL: ${OPENAI_MODEL}
+  INSIGHTS_CACHE_TTL: ${INSIGHTS_CACHE_TTL}
+  INSIGHTS_MAX_TOKENS: ${INSIGHTS_MAX_TOKENS}
+  INSIGHTS_DOWNSAMPLE: ${INSIGHTS_DOWNSAMPLE}
+  INSIGHTS_INCLUDE_SAMPLES: ${INSIGHTS_INCLUDE_SAMPLES}
+  OPENAI_USE_RESPONSES: ${OPENAI_USE_RESPONSES}
+  OPENAI_ENABLE_REASONING: ${OPENAI_ENABLE_REASONING}
+  DEVICE_TYPES: ${DEVICE_TYPES}
+  DEVICES_PER_TYPE: ${DEVICES_PER_TYPE}
+  # Publish behaviour
+  PUBLISH_INTERVAL_SEC: ${PUBLISH_INTERVAL_SEC}          # base period in seconds
+  PUBLISH_JITTER_SEC: ${PUBLISH_JITTER_SEC}          # +/- jitter per publish
+  OFFLINE_PROB: ${OFFLINE_PROB}               # probability a device goes offline at any tick
+  OFFLINE_DURATION_SEC: ${OFFLINE_DURATION_SEC}   # how long a device stays offline
+
+services:
+  db:
+    image: postgres:15
+    profiles: [api, ui, sim]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    profiles: [api, ui, sim]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+
+  api:
+    build:
+      context: ./api
+    profiles: [api, ui, sim]
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    environment:
+      <<: *env_backend
+    ports:
+      - "${BACKEND_PORT}:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_WS_URL: ${VITE_WS_URL}
+    profiles: [ui]
+    environment:
+      # For preview server only (build already baked VITE_*). Kept for clarity.
+      VITE_API_URL: ${VITE_API_URL}
+      VITE_WS_URL: ${VITE_WS_URL}
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT}:4173"
+
+  simulator:
+    build:
+      context: ./simulator
+    profiles: [sim]
+    environment:
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_TOPIC_BASE: ${MQTT_TOPIC_BASE}
+      DEVICE_TYPES: ${DEVICE_TYPES}
+      DEVICES_PER_TYPE: ${DEVICES_PER_TYPE}
+      # Publish behaviour
+      PUBLISH_INTERVAL_SEC: ${PUBLISH_INTERVAL_SEC}          # base period in seconds
+      PUBLISH_JITTER_SEC: ${PUBLISH_JITTER_SEC}          # +/- jitter per publish
+      OFFLINE_PROB: ${OFFLINE_PROB}               # probability a device goes offline at any tick
+      OFFLINE_DURATION_SEC: ${OFFLINE_DURATION_SEC}  
+      # Additional env will be added when simulator is implemented
+    depends_on:
+      mqtt:
+        condition: service_started
+
+volumes:
+  db_data:
+  mosquitto_data:

@@ -1,0 +1,4 @@
+# Create Password for mosquitto
+
+mkdir -Force .\infra\mosquitto\ | Out-Null
+docker run --rm -it `  -v ${PWD}\infra\mosquitto:/mosquitto `  eclipse-mosquitto:2 `  mosquitto_passwd -c /mosquitto/passwd tarora    

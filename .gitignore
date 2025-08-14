@@ -1,0 +1,6 @@
+/api
+/frontend
+/iot
+/simulator
+
+.env
